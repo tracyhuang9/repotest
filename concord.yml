@@ -1,4 +1,50 @@
 flows:
-  default:
+  bridge-sync:
     steps:
-      - log: "✅ Concord trigger test successful."
+      - log: "🔁 Starting sync from IND to DSRC, then forwarding to ENG"
+
+      # Step 1: Clone the bridge repo using PAT
+      - task: bash
+        in:
+          env:
+            GITHUB_USER: "${secrets.github-username}"
+            GITHUB_PAT: "${secrets.github-pat}"
+          script: |
+            set -e
+
+            echo "🔧 Configuring Git credentials"
+            git config --global user.name "$GITHUB_USER"
+            git config --global user.email "$GITHUB_USER@users.noreply.github.com"
+
+            echo "📦 Cloning bridge repo"
+            REPO_URL=https://$GITHUB_USER:$GITHUB_PAT@github.com/your-org/bridge-repo.git
+            git clone $REPO_URL
+            cd bridge-repo
+
+            echo "📥 Pulling from IND branch"
+            git checkout -b sync/ind1 origin/sync/ind1 || git checkout sync/ind1
+            git pull origin sync/ind1
+
+            echo "🔀 Merging into DSRC (main)"
+            git checkout main
+            git pull origin main
+            git merge sync/ind1 --no-edit || {
+              echo "⚠️ Merge conflict detected. Exiting.";
+              exit 1;
+            }
+
+            echo "📤 Pushing merged changes to DSRC"
+            git push origin main
+
+            echo "🚀 Forwarding changes to ENG repo"
+            git remote add eng https://$GITHUB_USER:$GITHUB_PAT@github.com/your-org/eng-repo.git || true
+            git push eng main:main
+
+      - log: "✅ Bridge repo sync and forward complete."
+
+triggers:
+  - type: github
+    condition:
+      event: push
+      repo: your-org/bridge-repo
+      branch: sync/ind1
