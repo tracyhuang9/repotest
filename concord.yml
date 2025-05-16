@@ -1,11 +1,4 @@
 flows:
   default:
     steps:
-      - log: "✅ Concord trigger verified."
-
-triggers:
-  - type: github
-    condition:
-      event: push
-      repo: your-username/your-repo
-      branch: main
+      - log: "✅ Concord trigger test successful."
