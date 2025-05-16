@@ -1,0 +1,11 @@
+flows:
+  default:
+    steps:
+      - log: "triggered by github"
+
+triggers:
+  - type: github
+    condition:
+      event: push
+      repo: sams-transportation/repotest
+      branch: main
