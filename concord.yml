@@ -1,13 +1,7 @@
 flows:
   default:
     steps:
-      - log: "Triggered by GitHub push!"
-      - expr: |
-          commitInfo = execution.getIn('trigger').get('data').get('head_commit');
-          commitSha = commitInfo.get('id');
-          author = commitInfo.get('author').get('name');
-          logger.info("Commit SHA: " + commitSha);
-          logger.info("Author: " + author);
+      - log: "✅ Concord trigger verified."
 
 triggers:
   - type: github
