@@ -1,0 +1,159 @@
+owner:
+  group: SamsSupplyChain-SOULE-C
+notify:
+  slack:
+    channelName: "sams-repo-test"
+profiles:
+  - cron-restart
+
+
+build:
+  buildType: docker
+  docker:
+    app:
+      dockerFile: Dockerfile
+    buildArgs:
+      basePythonOSVersion: 3.10
+      SKIP_TESTS: "true"
+      cpd: ${concordProcessId}
+      BUILDURL: ${BUILD_URL}
+      LOOPERID: ${LOOPER_RUN_ID}
+deploy:
+  namespace: "sams-inbound-density"
+  tenantSite: USSAMS
+  imagePullPolicy: Always
+  gslb:
+    strategy: stage
+    lbRoutings:
+      dev:
+        cnames: [ dev-inbound-density-eworker.samstms.walmart.com ]
+        matchStages: [ dev ]
+      stage:
+        cnames: [ stage-inbound-density-eworker.samstms.walmart.com ]
+        matchStages: [ stage ]
+      prod:
+        cnames: [ prod-inbound-density-eworker.samstms.walmart.com ]
+        matchStages: [ prod ]
+  releaseType:
+    strategy: normal
+    rollbackOnError: false
+    waitForReady: true
+    deployTimeout: 1800
+  postDeploy:
+    - task:
+        name: notifyMessage
+        text: "env: {{$.kittExec.currentStage.name}}\n
+                 Endpoints: {{$.kittExec.currentCluster.hosts}}"
+  helm:
+    values:
+      cronrestart:
+        schedule: "0 9 * * 1,3,5"
+        timeout: "10m"
+      env:
+        DYNATRACE_ENABLED: true
+      #### Akeyless Integration
+      secrets:
+        akeyless: true
+        file_refresh: true
+        config:
+          akeyless:
+            path: /Prod/WCNP/homeoffice/SamsSupplyChain-SOULE-C
+        files:
+          - destination: config.properties
+            content: id-logic/inbound-density/{{$.kittExec.currentCluster.profile}}/config
+          - destination: id-gcp-config.json
+            content: id-logic/inbound-density/{{$.kittExec.currentCluster.profile}}/id-gcp-config-enhance
+          - destination: id-azure-config.json
+            content: id-logic/inbound-density/{{$.kittExec.currentCluster.profile}}/id-azure-config-enhance
+      metadata:
+        annotations:
+          sidecar.istio.io/inject: 'false'  # Change this flag to false to disable istio sidecar injection for this service.
+          agent.sre.walmart.com/inject: 'true'
+          traffic.sidecar.istio.io/excludeOutboundPorts: 8300,8080  # Uncomment this line to use akeyless
+        labels:
+          # wm.app must be specified and the appkey must be registered in Walmart's
+          # Service Registry
+          wm.app: INBOUND-DENSITY-INBOUND-DENSITY
+          ccm.serviceId: INBOUND-DENSITY-INBOUND-DENSITY
+          ## Required CCM labels
+          ccm.envProfile: '{{$.kittExec.currentCluster.profile}}'
+          ccm.node: node
+          ccm.zone: '{{$.kittExec.currentCluster.site}}'
+          ccm.consumerContext: '{{$.kitt.build.artifact}}'
+          ccm.providerContext: '{{$.kitt.build.artifact}}'
+      min:
+        cpu: 2100m
+        memory: 2024Mi
+        
+      max:
+        cpu: 4000m
+        memory: 4096Mi
+      # StartUp: when a container application has started
+      # Checks Health Indicators every 20 seconds, up to 10min (failureThreshold * probeInterval)
+      # As soon as success response is received, it will enable live/readiness probes
+      startupProbe:
+        enabled: 'true'
+        path: /actuator/health
+        headers: "*/*"
+        port: 8080
+        probeInterval: 60
+        failureThreshold: 60
+      # Liveness: when to restart a container
+      livenessProbe:
+        path: /actuator/health/liveness
+        port: 8080
+        wait: 15
+      # Readiness: when a container is ready to start accepting traffic
+      readinessProbe:
+        path: /actuator/health/readiness
+        port: 8080
+        wait: 15
+      global:
+        metrics:
+          enabled: true
+          remoteWriteSampleLimit: 250
+          endpoints:
+            - targetPort: 8080
+              path: /actuator/prometheus
+          whitelist:
+            - http_server_requests_seconds_sum
+            - http_server_requests_seconds_count
+  stages:
+    - name: dev
+      flows: [ pr, release ]
+      target:
+        - cluster_id: [ "useast-dev-az-002" ]
+      refs: [main]
+      helm:
+        values:
+          metadata:
+            labels:
+              wm.env: '{{$.kittExec.currentStage.name}}'
+              ccm.serviceConfigVersion: "DEV-1.0"
+    - name: stage
+      flows: [ release ]
+      target:
+        - cluster_id: [ "useast-stage-az-303" ]
+      approvers:
+        groups: [ "SamsSupplyChain-SOULE-C" ]
+      refs: [ main ]
+      refs: [main]
+      helm:
+        values:
+          metadata:
+            labels:
+              wm.env: '{{$.kittExec.currentStage.name}}'
+              ccm.serviceConfigVersion: "STG-1.0"
+    - name: prod
+      flows: [ release ]
+      target:
+        - cluster_id: [ "eus2-prod-a60" ]
+      approvers:
+        groups: [ "SamsSupplyChain-SOULE-C" ]
+      refs: [ main ]
+      helm:
+        values:
+          metadata:
+            labels:
+              wm.env: '{{$.kittExec.currentStage.name}}'
+              ccm.serviceConfigVersion: "PROD-1.0"
